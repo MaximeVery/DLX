@@ -10,18 +10,18 @@
 
 
 typedef struct Thread_args_t{
-    int ligneDebut;
-    int ligneFin;
-    int lignesZeros;
-    int** relations;
-    int nbLignes;
-    int nbColonnes;
-    int nbIncidences;
-    int ** solutions;
-    size_t nbSolutions;
-    size_t tailleTabSolutions;
-    int nbElementsParSolution;
-    char* fichierEntree;
+    int ligneDebut; //première ligne contenant 0 que le thread doit prendre en compte
+    int ligneFin; // dernière ligne contenant 0 que le thread doit prendre en compte
+    int lignesZeros; // nombre total de lignes contenant 0
+    int** relations; // matrice des relations
+    int nbLignes; // nombre total de lignes
+    int nbColonnes; // nombre total de points
+    int nbIncidences; // nombre d'incidences par droite
+    int ** solutions; // tableau local des solutions
+    size_t nbSolutions; // nombre de solutions dans le tableau des solutions local
+    size_t tailleTabSolutions; // capacité maximale du tableau
+    int nbElementsParSolution; // nombre d'éléments par solution
+    char* fichierEntree; // fichier contenant les relations d'incidences
 } Thread_args_t;
 
 
@@ -46,6 +46,7 @@ int NB_COLONNES; // nombre de points dans l'espace projectif
 
 Point *solutions[100];
 
+//fonction qui ajoute une solution dans le tableau local des solutions
 void ajouterSolution(Thread_args_t* args, int k){
   if (args->nbSolutions == args->tailleTabSolutions){
     size_t nouvelleTaille = args->tailleTabSolutions * 2;
@@ -84,6 +85,7 @@ int** allocate_matrix(int rows, int cols) {
   return matrix;
 }
 
+// fonction qui permet de compter le nombre de lignes contenant le point étiquetté 0
 int count_zero_lines(const char *filename) {
   FILE *f = fopen(filename, "r");
   if (!f) {
@@ -135,6 +137,7 @@ void free_matrix(int** matrix, int rows) {
   free(matrix);
 }
 
+// fonction qui construit la matrice d'incidences à partir du fichier d'entrée
 int** lireFichier(const char* nomFichier, int* lignes, int* incidences, int* colonnes) {
   FILE* fichier = fopen(nomFichier, "r");
   if (fichier == NULL) {
@@ -192,6 +195,7 @@ void liberer_Matrice_Fichier(int** matrice, int lignes) {
   free(matrice);
 }
 
+// fonction qui crée les liens en fonction de la matrice d'incidences
 void initialiser_matrice(int** matrice,int** relations, int lignes,int incidences, int colonnes) {
   for (int j = 0; j < colonnes; j++) {
     matrice[0][j] = 1;
@@ -305,6 +309,7 @@ void initialiser_liens(Point **points, int** matrice, int lignes, int colonnes) 
 }
 
 
+// fonction pour insérer l'ensemble des solutions dans le fichier de sortie
 void insererSolutionsFichier(char* fichierSolutions, int nbThreads, Thread_args_t** args) {
   FILE *ecraserFichier = fopen(fichierSolutions, "w");
   fclose(ecraserFichier);
@@ -370,6 +375,8 @@ void demasquerColonne(Point *header) {
   header->right->left = header;
 }
 
+// fonction qui permet de masquer une ligne dans le cadre de la parallélisation
+// un thread masque les lignes qui ne lui appartiennent pas
 void masquerLigne(int ligneI, Point **points, int colonnes){
   for (int j = 0; j < colonnes; j++) {
     if (points[ligneI][j].def == 'D') {
@@ -384,6 +391,7 @@ void masquerLigne(int ligneI, Point **points, int colonnes){
   }
 }
 
+// fonction qui masque les lignes qui ne sont pas dans l'intervalle du thread
 void masquerLignesThread(int ligneDebut, int ligneFin, Point **points, int nbLignes, int colonnes){
   int compteurZeros = 0;
   for (int i = 1; i < nbLignes ; i++){
@@ -396,6 +404,7 @@ void masquerLignesThread(int ligneDebut, int ligneFin, Point **points, int nbLig
   } 
 }
 
+// fonction principale qui exécute la logique de l'algorithme DLX
 int DLX(Point **matrice, int k, int colonnes, Thread_args_t *args) {
   if (matrice[0][colonnes].right == &matrice[0][colonnes]) {
     ajouterSolution(args,k);
@@ -431,6 +440,7 @@ int DLX(Point **matrice, int k, int colonnes, Thread_args_t *args) {
   }
 }
 
+//fonction qui prépare l'appel à DLX
 void appel_DLX(char* fichierEntree, Thread_args_t *args)
 {
   int lignes, colonnes, incidences;
@@ -465,7 +475,7 @@ int main(int argc, char** argv) {
   
   int** relations = lireFichier(fichierEntree, &lignes, &incidences, &colonnes);
   int nbZeros = count_zero_lines(argv[1]);
-  int nbThreads = atoi(argv[3]);
+  int nbThreads = fmin((nbZeros-1)/2,atoi(argv[3]));
   int nbLignesParThread = ceil((double)nbZeros/(double)nbThreads);
   lignes +=1; // les en-têtes
   
@@ -497,9 +507,16 @@ int main(int argc, char** argv) {
         nbSolutionsTotal += args[i]-> nbSolutions;
   }
 
+  for (int i = 0; i < lignes-1; i++) {
+        free(relations[i]);
+  }
+  free(relations);
   insererSolutionsFichier(fichierSortie, nbThreads, args);
-  sleep(2);
   double timedif = ( ((double) clock()) / CLOCKS_PER_SEC) - time1;
+  for (int i = 0; i < nbThreads; i++) {
+        free(args[i]->solutions);
+        free(args[i]);
+  }
   printf("Le temps écoulé est de %lf secondes\n", timedif);
   printf("Nombre total de solution : %d \n", nbSolutionsTotal);
   return 0;
